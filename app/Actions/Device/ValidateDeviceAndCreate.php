@@ -73,12 +73,13 @@ class ValidateDeviceAndCreate
      * @throws \LibreNMS\Exceptions\HostUnreachableException
      * @throws \LibreNMS\Exceptions\SnmpVersionUnsupportedException
      */
-    public function execute(): bool
-    {
-        if ($this->device->exists) {
-            return false;
-        }
+public function execute(): bool
+{
+    if ($this->device->exists) {
+        return false;
+    }
 
+    try {
         $this->exceptIfHostnameExists();
         $this->fillDefaults();
 
@@ -101,8 +102,15 @@ class ValidateDeviceAndCreate
         }
 
         return $this->device->save();
+    } catch (\LibreNMS\Exceptions\HostExistsException $e) {
+        error_log("Erreur : " . $e->getMessage());
+        return false;
+    } catch (\Exception $e) {
+        error_log("Erreur inattendue : " . $e->getMessage());
+        return false;
     }
-
+}
+    
     /**
      * @throws \LibreNMS\Exceptions\HostUnreachableException
      * @throws \LibreNMS\Exceptions\SnmpVersionUnsupportedException
