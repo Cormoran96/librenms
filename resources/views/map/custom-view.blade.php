@@ -82,38 +82,50 @@
                     }
                 });
 
+                // Track the edge node/segment ids that should exist after this
+                // refresh so that stale waypoint elements can be cleaned up below.
+                var validEdgeNodes = {};
+                var validEdgeSegments = {};
                 $.each( data.edges, function( edgeid, edge) {
                     var mid = custommap.getEdgeMidCfg(edgeid, edge, screenshot);
-                    var edge1 = custommap.getEdgeCfg(edgeid, edge, "from", reverse_arrows);
-                    var edge2 = custommap.getEdgeCfg(edgeid, edge, "to", reverse_arrows);
+                    var edgeNodes = [mid].concat(custommap.getEdgeWaypointCfgs(edgeid, edge));
+                    var edgeSegments = custommap.getEdgeSegments(edgeid, edge, "from", reverse_arrows)
+                        .concat(custommap.getEdgeSegments(edgeid, edge, "to", reverse_arrows));
                     if(edge.port_id) {
                         edge_port_map[edgeid] = {device_id: edge.device_id, port_id: edge.port_id};
                     } else {
                         delete edge_port_map[edgeid];
                     }
-                    if (network_nodes.get(mid.id)) {
-                        network_nodes.update(mid);
-                        network_edges.update(edge1);
-                        network_edges.update(edge2);
-                    } else {
-                        network_nodes.add([mid]);
-                        network_edges.add([edge1, edge2]);
-                    }
+
+                    edgeNodes.forEach((node) => {
+                        validEdgeNodes[node.id] = true;
+                        network_nodes.get(node.id) ? network_nodes.update(node) : network_nodes.add([node]);
+                    });
+                    edgeSegments.forEach((seg) => {
+                        validEdgeSegments[seg.id] = true;
+                        network_edges.get(seg.id) ? network_edges.update(seg) : network_edges.add([seg]);
+                    });
                 });
 
                 // Remove any nodes that are not in the database, includes edges
                 $.each( network_nodes.getIds(), function( node_idx, nodeid ) {
-                    if(nodeid.endsWith('_mid')) {
-                        edgeid = nodeid.split("_")[0];
-                        if(! (edgeid in data.edges)) {
-                            network_nodes.remove(edgeid + "_mid");
-                            network_edges.remove(edgeid + "_to");
-                            network_edges.remove(edgeid + "_from");
+                    if(nodeid.endsWith('_mid') || nodeid.includes('_wp_')) {
+                        // Mid and waypoint dots are removed when their edge is gone
+                        // or when the edge no longer has that waypoint.
+                        if(! (nodeid in validEdgeNodes)) {
+                            network_nodes.remove(nodeid);
                         }
-                    } else {
+                    } else if(! nodeid.startsWith('legend_')) {
                         if(! (nodeid in data.nodes)) {
                             network_nodes.remove(nodeid);
                         }
+                    }
+                });
+
+                // Remove any edge segments that are no longer part of an edge
+                $.each( network_edges.getIds(), function( edge_idx, segid ) {
+                    if(! (segid in validEdgeSegments)) {
+                        network_edges.remove(segid);
                     }
                 });
 

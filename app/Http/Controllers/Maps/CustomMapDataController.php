@@ -74,6 +74,7 @@ class CustomMapDataController extends Controller
                 'text_align' => $edge->text_align,
                 'mid_x' => $edge->mid_x,
                 'mid_y' => $edge->mid_y,
+                'waypoints' => $edge->waypoints ?? [],
             ];
             if ($edge->port) {
                 $edges[$edgeid]['device_id'] = $edge->port->device_id;
@@ -291,6 +292,7 @@ class CustomMapDataController extends Controller
                 $dbedge->text_align = $edge['text_align'];
                 $dbedge->mid_x = intval($edge['mid_x']);
                 $dbedge->mid_y = intval($edge['mid_y']);
+                $dbedge->waypoints = $this->sanitizeWaypoints($edge['waypoints'] ?? []);
 
                 $dbedge->save();
                 $edgesProcessed[$dbedge->custom_map_edge_id] = true;
@@ -308,6 +310,30 @@ class CustomMapDataController extends Controller
         });
 
         return response()->json(['id' => $map->custom_map_id]);
+    }
+
+    /**
+     * Normalise the waypoints submitted by the editor into an ordered list of
+     * integer {x, y} coordinates. Returns null when there are no waypoints so
+     * the edge falls back to the simple single-midpoint behaviour.
+     *
+     * @param  mixed  $waypoints
+     * @return array<int, array{x: int, y: int}>|null
+     */
+    private function sanitizeWaypoints($waypoints): ?array
+    {
+        if (! is_array($waypoints)) {
+            return null;
+        }
+
+        $clean = [];
+        foreach ($waypoints as $waypoint) {
+            if (is_array($waypoint) && isset($waypoint['x'], $waypoint['y'])) {
+                $clean[] = ['x' => intval($waypoint['x']), 'y' => intval($waypoint['y'])];
+            }
+        }
+
+        return $clean === [] ? null : $clean;
     }
 
     private function rateString(int $rate): string

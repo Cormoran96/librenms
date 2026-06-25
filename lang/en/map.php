@@ -155,6 +155,7 @@ return [
             'edge' => [
                 'new' => 'New Edge',
                 'add' => 'Add Edge',
+                'add_waypoint' => 'Add Waypoint',
                 'edit' => 'Edit Edge',
                 'defaults_title' => 'Edge Default Config',
                 'dynamic_width' => 'Dynamic Width',

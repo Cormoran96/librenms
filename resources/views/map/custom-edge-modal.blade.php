@@ -144,6 +144,7 @@
                 <center>
                     <button type=button class="btn btn-primary new-edge" value="savedefaults" id="edge-saveDefaultsButton" data-dismiss="modal" style="display:none" onclick="edgeDefaultsSave();">{{ __('map.custom.edit.defaults') }}</button>
                     <button type=button class="btn btn-primary existing-edge" value="save" id="edge-saveButton" data-dismiss="modal">{{ __('Save') }}</button>
+                    <button type=button class="btn btn-default existing-edge" value="addwaypoint" id="edge-addWaypointButton" data-dismiss="modal" style="display:none">{{ __('map.custom.edit.edge.add_waypoint') }}</button>
                     <button type=button class="btn btn-primary" value="cancel" id="edge-cancelButton" data-dismiss="modal">{{ __('Cancel') }}</button>
                 </center>
             </div>
@@ -336,6 +337,17 @@
 
         $("#edge-saveButton").on("click", {data: edgedata}, edgeSave);
         $("#edge-cancelButton").on("click", {data: edgedata}, edgeCancel);
+
+        // Adding waypoints is only possible on an already created edge
+        $("#edge-addWaypointButton").off("click");
+        if(edgedata.add) {
+            $("#edge-addWaypointButton").hide();
+        } else {
+            $("#edge-addWaypointButton").show();
+            $("#edge-addWaypointButton").on("click", {data: edgedata}, function (event) {
+                edgeAddWaypoint(event.data.data.id);
+            });
+        }
 
         $('#edgeModal').modal({backdrop: 'static', keyboard: false}, 'show');
     }

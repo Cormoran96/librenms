@@ -570,11 +570,14 @@
         $.each(network_nodes.get(), function (node_idx, node) {
             if(node.id.startsWith("legend_")) {
                 return;
+            } else if(typeof node.id === "string" && node.id.includes("_wp_")) {
+                // Waypoint dots are persisted as part of their edge, not as nodes
+                return;
             } else if(node.id.endsWith("_mid")) {
                 edgeid = node.id.split("_")[0];
                 edge1 = network_edges.get(edgeid + "_from");
                 edge2 = network_edges.get(edgeid + "_to");
-                edges[edgeid] = {id: edgeid, text_colour: edge1.font.color, text_size: edge1.font.size, text_face: edge1.font.face, text_align: edge1.font.align, from: edge1.from, to: edge2.from, showpct: (edge1.label != null && edge1.label.includes("xx%")), showbps: (edge1.label != null && edge1.label.includes("bps")), label: (node.label || ''), fixed_width: (edge1.width || null), port_id: edge1.title, style: edge1.smooth.type, mid_x: node.x, mid_y: node.y, reverse: (edgeid in edge_port_map ? edge_port_map[edgeid].reverse : false)};
+                edges[edgeid] = {id: edgeid, text_colour: edge1.font.color, text_size: edge1.font.size, text_face: edge1.font.face, text_align: edge1.font.align, from: edge1.from, to: edge2.from, showpct: (edge1.label != null && edge1.label.includes("xx%")), showbps: (edge1.label != null && edge1.label.includes("bps")), label: (node.label || ''), fixed_width: (edge1.width || null), port_id: edge1.title, style: edge1.smooth.type, mid_x: node.x, mid_y: node.y, waypoints: getEdgeWaypoints(edgeid), reverse: (edgeid in edge_port_map ? edge_port_map[edgeid].reverse : false)};
             } else {
                 if(node.icon.code) {
                     node.icon = node.icon.code.charCodeAt(0).toString(16);
@@ -644,6 +647,13 @@
     function checkEditNode(data) {
         // If we have an ID that is non numeric, we can check node type further
         if(data.id && isNaN(data.id)) {
+            // Double clicking a VIA waypoint dot removes it
+            if(data.id.includes("_wp_")) {
+                var parts = data.id.split("_");
+                edgeDeleteWaypoint(parts[0], parseInt(parts[2]));
+                return;
+            }
+
             // Editing a mid point node triggers editing the edge
             if(data.id.endsWith("_mid")) {
                 edge = network_edges.get((data.id.split("_")[0]) + "_to");
@@ -702,11 +712,121 @@
         const edge2 = network_edges.get(edgeid + "_to");
         var nm_id = edge1.from < edge2.from ? edge1.from + '.' + edge2.from : edge2.from + '.' + edge1.from;
         edgeNodesRemove(nm_id, edgeid);
-        network_edges.remove(edgeid + "_to");
-        network_edges.remove(edgeid + "_from");
+        // Remove the endpoint segments, any waypoint segments and the waypoint dots
+        network_edges.get({filter: (e) => e.id.startsWith(edgeid + "_")}).forEach((e) => network_edges.remove(e.id));
         network_edges.flush();
-        network_nodes.remove(edgeid + "_mid");
+        network_nodes.get({filter: (n) => n.id == edgeid + "_mid" || n.id.startsWith(edgeid + "_wp_")}).forEach((n) => network_nodes.remove(n.id));
         network_nodes.flush();
+        $("#map-saveDataButton").show();
+    }
+
+    // --- VIA waypoint helpers -------------------------------------------------
+    // The waypoints are an ordered list (node1 -> node2). The two halves of the
+    // edge meet at the mid node, so the first ceil(n/2) waypoints belong to the
+    // "from" half and the remainder to the "to" half (drawn node2 -> mid).
+    function waypointIndexesForHalf(numWaypoints, fromto) {
+        var split = Math.ceil(numWaypoints / 2);
+        var indexes = [];
+        if (fromto == "from") {
+            for (var i = 0; i < split; i++) {
+                indexes.push(i);
+            }
+        } else {
+            for (var j = numWaypoints - 1; j >= split; j--) {
+                indexes.push(j);
+            }
+        }
+        return indexes;
+    }
+
+    function waypointNodeId(edgeid, index) {
+        return edgeid + "_wp_" + index;
+    }
+
+    // Read the current waypoints of an edge from its dot nodes, node1 -> node2.
+    function getEdgeWaypoints(edgeid) {
+        var pts = [];
+        for (var i = 0; ; i++) {
+            var n = network_nodes.get(waypointNodeId(edgeid, i));
+            if (!n) {
+                break;
+            }
+            pts.push({x: Math.round(n.x), y: Math.round(n.y)});
+        }
+        return pts;
+    }
+
+    // (Re)build the waypoint dots and intermediate segments for an edge. The
+    // endpoint segments (_from/_to) and the mid node must already exist; this
+    // re-wires _from/_to to the nearest waypoint and chains the rest to the mid.
+    function applyEdgeWaypoints(edgeid, waypoints) {
+        var edge1 = network_edges.get(edgeid + "_from");
+        var edge2 = network_edges.get(edgeid + "_to");
+        if (!edge1 || !edge2) {
+            return;
+        }
+
+        // Clear out any existing waypoint dots and intermediate segments
+        network_nodes.get({filter: (n) => n.id.startsWith(edgeid + "_wp_")}).forEach((n) => network_nodes.remove(n.id));
+        network_edges.get({filter: (e) => e.id.startsWith(edgeid + "_fromseg_") || e.id.startsWith(edgeid + "_toseg_")}).forEach((e) => network_edges.remove(e.id));
+
+        waypoints = Array.isArray(waypoints) ? waypoints : [];
+
+        // Create the dot nodes
+        waypoints.forEach((wp, index) => {
+            network_nodes.add({id: waypointNodeId(edgeid, index), shape: "dot", size: 3, x: wp.x, y: wp.y, label: ''});
+        });
+
+        // Re-wire each half: endpoint segment -> dots... -> mid
+        [["from", edge1, "_fromseg_"], ["to", edge2, "_toseg_"]].forEach(([fromto, endpointEdge, segPrefix]) => {
+            var path = [endpointEdge.from];
+            waypointIndexesForHalf(waypoints.length, fromto).forEach((index) => {
+                path.push(waypointNodeId(edgeid, index));
+            });
+            path.push(edgeid + "_mid");
+
+            // The endpoint segment connects the real node to the next point
+            endpointEdge.to = path[1];
+            network_edges.update(endpointEdge);
+
+            // Intermediate segments inherit the styling but carry no arrow/label
+            for (var i = 1; i < path.length - 1; i++) {
+                network_edges.add({
+                    id: edgeid + segPrefix + i,
+                    from: path[i],
+                    to: path[i + 1],
+                    arrows: {to: {enabled: false}, from: {enabled: false}},
+                    font: endpointEdge.font,
+                    smooth: endpointEdge.smooth,
+                    width: endpointEdge.width,
+                    color: endpointEdge.color,
+                    arrowStrikethrough: false,
+                });
+            }
+        });
+        network_nodes.flush();
+        network_edges.flush();
+    }
+
+    function edgeAddWaypoint(edgeid) {
+        var mid = network_nodes.get(edgeid + "_mid");
+        if (!mid) {
+            return;
+        }
+        var waypoints = getEdgeWaypoints(edgeid);
+        // Drop the new waypoint slightly off the mid point so it is easy to grab
+        waypoints.push({x: Math.round(mid.x) + 30, y: Math.round(mid.y) + 30});
+        applyEdgeWaypoints(edgeid, waypoints);
+        $("#map-saveDataButton").show();
+    }
+
+    function edgeDeleteWaypoint(edgeid, index) {
+        var waypoints = getEdgeWaypoints(edgeid);
+        if (index < 0 || index >= waypoints.length) {
+            return;
+        }
+        waypoints.splice(index, 1);
+        applyEdgeWaypoints(edgeid, waypoints);
         $("#map-saveDataButton").show();
     }
 
@@ -811,6 +931,8 @@
                         network_nodes.add([mid]);
                         network_edges.add([edge1, edge2]);
                     }
+                    // (Re)build the VIA waypoint dots and intermediate segments
+                    applyEdgeWaypoints(edgeid, edge.waypoints);
                 });
 
                 // Remove any nodes that are not in the database, includes edges
@@ -819,10 +941,10 @@
                         edgeid = nodeid.split("_")[0];
                         if(! (edgeid in data.edges)) {
                             network_nodes.remove(edgeid + "_mid");
-                            network_edges.remove(edgeid + "_to");
-                            network_edges.remove(edgeid + "_from");
+                            network_nodes.get({filter: (n) => n.id.startsWith(edgeid + "_wp_")}).forEach((n) => network_nodes.remove(n.id));
+                            network_edges.get({filter: (e) => e.id.startsWith(edgeid + "_")}).forEach((e) => network_edges.remove(e.id));
                         }
-                    } else {
+                    } else if(! nodeid.includes('_wp_') && ! nodeid.startsWith('legend_')) {
                         if(! (nodeid in data.nodes)) {
                             network_nodes.remove(nodeid);
                         }

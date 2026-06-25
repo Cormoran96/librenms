@@ -52,14 +52,15 @@
 
                 $.each( data.edges, function( edgeid, edge) {
                     var mid = custommap.getEdgeMidCfg(edgeid, edge, Boolean({{$screenshot}}));
-                    var edge1 = custommap.getEdgeCfg(edgeid, edge, "from", reverse_arrows);
-                    var edge2 = custommap.getEdgeCfg(edgeid, edge, "to", reverse_arrows);
+                    var edgeNodes = [mid].concat(custommap.getEdgeWaypointCfgs(edgeid, edge));
+                    var edgeSegments = custommap.getEdgeSegments(edgeid, edge, "from", reverse_arrows)
+                        .concat(custommap.getEdgeSegments(edgeid, edge, "to", reverse_arrows));
 
                     if(edge.port_id) {
                         edge_port_map[edgeid] = {device_id: edge.device_id, port_id: edge.port_id};
                     }
-                    network_nodes.add([mid]);
-                    network_edges.add([edge1, edge2]);
+                    network_nodes.add(edgeNodes);
+                    network_edges.add(edgeSegments);
                 });
 
                 custommap.redrawDefaultLegend(network_nodes, {{ $map->legend_steps }}, {{ $map->legend_x }}, {{ $map->legend_y }}, {{ $map->legend_font_size }}, {{ $map->legend_hide_invalid }}, {{ $map->legend_hide_overspeed }}, {{ Js::from($map->legend_colours) }});

@@ -151,55 +151,115 @@
             return node_cfg;
         },
 
-        getEdgeCfg: function (edgeid, edge, fromto, reverse_arrows) {
-            if (Boolean(reverse_arrows)) {
-                arrows = {from: {enabled: true, scaleFactor: 0.6}, to: {enabled: false}};
+        // The waypoints are an ordered list (node1 -> node2). The two halves of
+        // the edge meet at the mid node, so the first ceil(n/2) waypoints belong
+        // to the "from" half and the remainder to the "to" half (in reverse, as
+        // that half is drawn node2 -> mid). Returns the ordered global waypoint
+        // indices that make up the requested half.
+        waypointIndexesForHalf: function (edge, fromto) {
+            var waypoints = Array.isArray(edge.waypoints) ? edge.waypoints : [];
+            var split = Math.ceil(waypoints.length / 2);
+            var indexes = [];
+            if (fromto == "from") {
+                for (var i = 0; i < split; i++) {
+                    indexes.push(i);
+                }
             } else {
-                arrows = {to: {enabled: true, scaleFactor: 0.6}, from: {enabled: false}};
+                for (var j = waypoints.length - 1; j >= split; j--) {
+                    indexes.push(j);
+                }
+            }
+            return indexes;
+        },
+
+        waypointNodeId: function (edgeid, index) {
+            return edgeid + "_wp_" + index;
+        },
+
+        // Build every line segment for one half of an edge. Without waypoints
+        // this is a single segment (endpoint -> mid), identical to the original
+        // behaviour. With waypoints it is a chain endpoint -> wp -> ... -> mid.
+        getEdgeSegments: function (edgeid, edge, fromto, reverse_arrows) {
+            if (Boolean(reverse_arrows)) {
+                var arrows = {from: {enabled: true, scaleFactor: 0.6}, to: {enabled: false}};
+            } else {
+                var arrows = {to: {enabled: true, scaleFactor: 0.6}, from: {enabled: false}};
             }
 
-            var edge_cfg = {id: edgeid + "_" + fromto, to: edgeid + "_mid", arrows: arrows, font: {face: edge.text_face, size: edge.text_size, color: edge.text_colour, background: "#FFFFFF", align: edge.text_align || "horizontal"}, smooth: {type: edge.style}, arrowStrikethrough: false};
+            var smooth_type = edge.style;
+            var endpoint, port_pct, port_bps, port_colour, port_width;
             if (fromto == "from") {
-                edge_cfg.from = edge.custom_map_node1_id;
-                var port_pct = Boolean(reverse_arrows) ? edge.port_topct : edge.port_frompct;
-                var port_bps = Boolean(reverse_arrows) ? edge.port_tobps : edge.port_frombps;
-                var port_colour = Boolean(reverse_arrows) ? edge.colour_to : edge.colour_from;
-                var port_width = Boolean(reverse_arrows) ? edge.width_to : edge.width_from;
+                endpoint = edge.custom_map_node1_id;
+                port_pct = Boolean(reverse_arrows) ? edge.port_topct : edge.port_frompct;
+                port_bps = Boolean(reverse_arrows) ? edge.port_tobps : edge.port_frombps;
+                port_colour = Boolean(reverse_arrows) ? edge.colour_to : edge.colour_from;
+                port_width = Boolean(reverse_arrows) ? edge.width_to : edge.width_from;
             } else if (fromto == "to") {
-                edge_cfg.from = edge.custom_map_node2_id;
-                var port_pct = Boolean(reverse_arrows) ? edge.port_frompct : edge.port_topct;
-                var port_bps = Boolean(reverse_arrows) ? edge.port_frombps : edge.port_tobps;
-                var port_colour = Boolean(reverse_arrows) ? edge.colour_from : edge.colour_to;
-                var port_width = Boolean(reverse_arrows) ? edge.width_from : edge.width_to;
+                endpoint = edge.custom_map_node2_id;
+                port_pct = Boolean(reverse_arrows) ? edge.port_frompct : edge.port_topct;
+                port_bps = Boolean(reverse_arrows) ? edge.port_frombps : edge.port_tobps;
+                port_colour = Boolean(reverse_arrows) ? edge.colour_from : edge.colour_to;
+                port_width = Boolean(reverse_arrows) ? edge.width_from : edge.width_to;
 
                 // Special case for curved lines
-                if(edge_cfg.smooth.type == "curvedCW") {
-                    edge_cfg.smooth.type = "curvedCCW";
-                } else if (edge_cfg.smooth.type == "curvedCCW") {
-                    edge_cfg.smooth.type = "curvedCW";
+                if(smooth_type == "curvedCW") {
+                    smooth_type = "curvedCCW";
+                } else if (smooth_type == "curvedCCW") {
+                    smooth_type = "curvedCW";
                 }
             } else {
-                console.log("custommapGetEdgeCfg got an invalid value in fromto:" + fromto);
-                return {};
+                console.log("getEdgeSegments got an invalid value in fromto:" + fromto);
+                return [];
             }
-            if(edge.port_id) {
-                edge_cfg.title = document.createElement("div");
-                edge_cfg.title.innerHTML = edge.port_info;
-                if(edge.showpct) {
-                    edge_cfg.label = port_pct + "%";
-                }
-                if(edge.showbps) {
-                    if(edge_cfg.label == null) {
-                        edge_cfg.label = '';
-                    } else {
-                        edge_cfg.label += "\n";
+
+            // Ordered list of node ids this half passes through, ending at mid.
+            var path = [endpoint];
+            custommap.waypointIndexesForHalf(edge, fromto).forEach(function (index) {
+                path.push(custommap.waypointNodeId(edgeid, index));
+            });
+            path.push(edgeid + "_mid");
+
+            var segments = [];
+            for (var i = 0; i < path.length - 1; i++) {
+                var last = (i == path.length - 2);
+                var seg = {
+                    id: last ? (edgeid + "_" + fromto) : (edgeid + "_" + fromto + "_" + i),
+                    from: path[i],
+                    to: path[i + 1],
+                    // Only the final segment carries the direction arrow and label
+                    arrows: last ? arrows : {to: {enabled: false}, from: {enabled: false}},
+                    font: {face: edge.text_face, size: edge.text_size, color: edge.text_colour, background: "#FFFFFF", align: edge.text_align || "horizontal"},
+                    smooth: {type: smooth_type},
+                    arrowStrikethrough: false,
+                };
+                if(edge.port_id) {
+                    seg.title = document.createElement("div");
+                    seg.title.innerHTML = edge.port_info;
+                    if(last && edge.showpct) {
+                        seg.label = port_pct + "%";
                     }
-                    edge_cfg.label += port_bps;
+                    if(last && edge.showbps) {
+                        if(seg.label == null) {
+                            seg.label = '';
+                        } else {
+                            seg.label += "\n";
+                        }
+                        seg.label += port_bps;
+                    }
+                    seg.color = {color: port_colour};
+                    seg.width = parseFloat(edge.fixed_width) || port_width;
                 }
-                edge_cfg.color = {color: port_colour};
-                edge_cfg.width = parseFloat(edge.fixed_width) || port_width;
+                segments.push(seg);
             }
-            return edge_cfg;
+            return segments;
+        },
+
+        // Hidden dot nodes that the waypoint segments route through.
+        getEdgeWaypointCfgs: function (edgeid, edge) {
+            var waypoints = Array.isArray(edge.waypoints) ? edge.waypoints : [];
+            return waypoints.map(function (wp, index) {
+                return {id: custommap.waypointNodeId(edgeid, index), shape: "dot", size: 0, x: wp.x, y: wp.y, label: ''};
+            });
         },
 
         getEdgeMidCfg: function (edgeid, edge, screenshot) {

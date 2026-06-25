@@ -581,6 +581,7 @@ CREATE TABLE `custom_map_edges` (
   `text_align` varchar(16) NOT NULL DEFAULT 'horizontal',
   `mid_x` int(11) NOT NULL,
   `mid_y` int(11) NOT NULL,
+  `waypoints` longtext DEFAULT NULL,
   `created_at` timestamp NULL DEFAULT NULL,
   `updated_at` timestamp NULL DEFAULT NULL,
   PRIMARY KEY (`custom_map_edge_id`),
